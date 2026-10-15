@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Progress</title>
+<style>
+  :root { --fg: #ececec; --muted: rgba(236,236,236,.6); --track: rgba(255,255,255,.14); --accent: #EF9F27; }
+  :root[data-theme="light"] { --fg: #1f1f1f; --muted: rgba(31,31,31,.62); --track: rgba(0,0,0,.1); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: transparent; overflow: hidden; }
+  body {
+    /* --u = 1 design pixel; base design is 220 x 140 and scales with the frame */
+    --u: min(calc(100vw / 220), calc(100vh / 140));
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--fg);
+    padding: calc(var(--u) * 5) calc(var(--u) * 7);
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .row { display: flex; flex-direction: column; }
+  .top { display: flex; justify-content: space-between; align-items: baseline;
+         font-size: calc(var(--u) * 8); line-height: calc(var(--u) * 10); white-space: nowrap; }
+  .label { font-weight: 600; }
+  .pct { font-weight: 400; margin-left: calc(var(--u) * 4); font-variant-numeric: tabular-nums; }
+  .left { color: var(--muted); font-size: calc(var(--u) * 6.5); }
+  .track { height: calc(var(--u) * 4); border-radius: calc(var(--u) * 2); background: var(--track);
+           margin: calc(var(--u) * 1.5) 0; overflow: hidden; }
+  .fill { height: 100%; width: 0; background: var(--accent); border-radius: calc(var(--u) * 2); }
+  .range { color: var(--muted); font-size: calc(var(--u) * 6); line-height: calc(var(--u) * 7.5);
+           font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #test { position: fixed; inset: 0; padding: 12px; font: 13px/1.5 ui-monospace, Consolas, monospace;
+          background: #111; color: #ddd; overflow: auto; white-space: pre-wrap; }
+  #test .ok { color: #6c6; } #test .bad { color: #f66; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+(function () {
+  'use strict';
+  var TZ = 'Asia/Manila';
+  var DAY = 86400000;
+  var fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ, hourCycle: 'h23',
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric'
+  });
+
+  // Manila wall-clock parts for a real instant.
+  function manilaParts(date) {
+    var p = {};
+    fmt.formatToParts(date).forEach(function (x) { if (x.type !== 'literal') p[x.type] = +x.value; });
+    return { y: p.year, m: p.month, d: p.day, h: p.hour % 24, mi: p.minute, s: p.second };
+  }
+
+  // Calendar dates are handled as UTC "day numbers" so no device zone/DST can leak in.
+  function ms(y, m, d, h, mi, s) { return Date.UTC(y, m - 1, d, h || 0, mi || 0, s || 0); }
+  function dayNum(y, m, d) { return Math.round(ms(y, m, d) / DAY); }
+  function fromDayNum(n) { var t = new Date(n * DAY); return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() }; }
+  function dow(n) { return new Date(n * DAY).getUTCDay(); } // 0 = Sunday
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function fmtDay(n) { var o = fromDayNum(n); return pad(o.m) + '-' + pad(o.d) + '-' + o.y; }
+
+  // Review month (majority-of-week): a Sun-Sat week belongs to the month holding its Wednesday.
+  function reviewMonth(y, m, d) {
+    var n = dayNum(y, m, d);
+    var wed = n - dow(n) + 3;
+    var w = fromDayNum(wed); // owning calendar month
+    var firstWed = dayNum(w.y, w.m, 1);
+    firstWed += (3 - dow(firstWed) + 7) % 7;
+    var lastWed = dayNum(w.y, w.m + 1, 1) - 1;
+    lastWed -= (dow(lastWed) - 3 + 7) % 7;
+    return { start: firstWed - 3, end: lastWed + 3, month: w.m, year: w.y };
+  }
+
+  // Each period: start/end day numbers (inclusive). Elapsed is measured on Manila wall-clock.
+  function periods(t) {
+    var n = dayNum(t.y, t.m, t.d);
+    var q0 = Math.floor((t.m - 1) / 3) * 3 + 1;
+    var rm = reviewMonth(t.y, t.m, t.d);
+    var wk = n - dow(n);
+    return [
+      { label: 'Year',    start: dayNum(t.y, 1, 1),  end: dayNum(t.y, 12, 31) },
+      { label: 'Quarter', start: dayNum(t.y, q0, 1), end: dayNum(t.y, q0 + 3, 1) - 1 },
+      { label: 'Month',   start: rm.start,           end: rm.end },
+      { label: 'Week',    start: wk,                 end: wk + 6 },
+      { label: 'Day',     start: n,                  end: n }
+    ];
+  }
+
+  function compute(t) {
+    var now = ms(t.y, t.m, t.d, t.h, t.mi, t.s);
+    var today = dayNum(t.y, t.m, t.d);
+    return periods(t).map(function (p) {
+      var a = p.start * DAY, b = (p.end + 1) * DAY;
+      var pct = Math.max(0, Math.min(100, Math.floor((now - a) / (b - a) * 100)));
+      var left = p.label === 'Day'
+        ? (24 - t.h - (t.mi || t.s ? 1 : 0)) + 'h left'
+        : (p.end - today) + ' day' + (p.end - today === 1 ? '' : 's') + ' left';
+      return { label: p.label, pct: pct, left: left, range: fmtDay(p.start) + ' – ' + fmtDay(p.end) };
+    });
+  }
+
+  var qs = new URLSearchParams(location.search);
+
+  // Theme + accent
+  var theme = qs.get('theme') === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', theme);
+  var acc = (qs.get('accent') || '').replace(/^#/, '');
+  if (/^([0-9a-f]{3}|[0-9a-f]{6})$/i.test(acc)) document.documentElement.style.setProperty('--accent', '#' + acc);
+
+  function render() {
+    var rows = compute(manilaParts(new Date()));
+    document.getElementById('app').innerHTML = '';
+    var app = document.getElementById('app');
+    rows.forEach(function (r) {
+      var el = document.createElement('div');
+      el.className = 'row';
+      var top = document.createElement('div'); top.className = 'top';
+      var l = document.createElement('span');
+      var lab = document.createElement('span'); lab.className = 'label'; lab.textContent = r.label;
+      var pc = document.createElement('span'); pc.className = 'pct'; pc.textContent = r.pct + '%';
+      l.appendChild(lab); l.appendChild(pc);
+      var lf = document.createElement('span'); lf.className = 'left'; lf.textContent = r.left;
+      top.appendChild(l); top.appendChild(lf);
+      var tr = document.createElement('div'); tr.className = 'track';
+      tr.setAttribute('role', 'progressbar'); tr.setAttribute('aria-label', r.label);
+      tr.setAttribute('aria-valuenow', r.pct); tr.setAttribute('aria-valuemin', 0); tr.setAttribute('aria-valuemax', 100);
+      var f = document.createElement('div'); f.className = 'fill'; f.style.width = r.pct + '%';
+      tr.appendChild(f);
+      var rg = document.createElement('div'); rg.className = 'range'; rg.textContent = r.range;
+      el.appendChild(top); el.appendChild(tr); el.appendChild(rg);
+      app.appendChild(el);
+    });
+  }
+
+  // One timer to the next Manila midnight (no polling), plus a re-render when the tab wakes up.
+  function scheduleMidnight() {
+    var t = manilaParts(new Date());
+    var msLeft = DAY - ((t.h * 60 + t.mi) * 60 + t.s) * 1000;
+    setTimeout(function () { render(); scheduleMidnight(); }, msLeft + 500);
+  }
+
+  // Hidden self-test: ?test=1
+  function selfTest() {
+    var out = [], pass = 0, fail = 0;
+    function eq(name, got, want) {
+      var ok = got === want; ok ? pass++ : fail++;
+      out.push('<span class="' + (ok ? 'ok' : 'bad') + '">' + (ok ? 'PASS' : 'FAIL') + '</span> ' + name +
+               (ok ? '' : ' — got ' + got + ', want ' + want));
+    }
+    function rng(y, m, d) { var r = reviewMonth(y, m, d); return fmtDay(r.start) + ' to ' + fmtDay(r.end); }
+    eq('09-01-2026 -> September = 08-30-2026 to 10-03-2026', rng(2026, 9, 1), '08-30-2026 to 10-03-2026');
+    eq('10-04-2026 -> October starts 10-04-2026', fmtDay(reviewMonth(2026, 10, 4).start), '10-04-2026');
+    eq('10-03-2026 -> still September (month 9)', reviewMonth(2026, 10, 3).month, 9);
+    eq('10-03-2026 -> September ends 10-03-2026', fmtDay(reviewMonth(2026, 10, 3).end), '10-03-2026');
+    eq('08-30-2026 (Sunday) -> September', reviewMonth(2026, 8, 30).month, 9);
+    eq('08-29-2026 (Saturday) -> August', reviewMonth(2026, 8, 29).month, 8);
+    eq('10-15-2026 -> October = 10-04-2026 to 10-31-2026', rng(2026, 10, 15), '10-04-2026 to 10-31-2026');
+    eq('12-31-2026 -> December wraps year = 11-29-2026 to 01-02-2027', rng(2026, 12, 31), '11-29-2026 to 01-02-2027');
+    var y = compute({ y: 2026, m: 7, d: 2, h: 12, mi: 0, s: 0 });
+    eq('Year 07-02-2026 12:00 = 50%', y[0].pct, 50);
+    eq('Day 12:00 = 50%', y[4].pct, 50);
+    eq('Quarter range Q3', y[1].range, '07-01-2026 – 09-30-2026');
+    // Timezone independence: instant 2026-10-03T17:00Z is already 10-04 01:00 in Manila.
+    var mp = manilaParts(new Date(Date.UTC(2026, 9, 3, 17, 0, 0)));
+    eq('Manila conversion 2026-10-03T17:00Z -> 10-04 01:00', mp.m + '-' + mp.d + ' ' + mp.h, '10-4 1');
+    out.push('', (fail ? '<span class="bad">' : '<span class="ok">') + pass + ' passed, ' + fail + ' failed</span>');
+    var box = document.createElement('div'); box.id = 'test';
+    box.innerHTML = 'Progress widget self-test\n\n' + out.join('\n');
+    document.body.appendChild(box);
+    document.title = fail ? 'TEST FAIL' : 'TEST PASS';
+  }
+
+  render();
+  scheduleMidnight();
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) render(); });
+  if (qs.get('test') === '1') selfTest();
+})();
+</script>
+</body>
+</html>
