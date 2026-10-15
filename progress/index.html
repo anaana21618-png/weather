@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Progress</title>
 <style>
-  :root { --fg: #ececec; --muted: rgba(236,236,236,.6); --track: rgba(255,255,255,.14); --accent: #EF9F27; }
-  :root[data-theme="light"] { --fg: #1f1f1f; --muted: rgba(31,31,31,.62); --track: rgba(0,0,0,.1); }
+  :root { --fg: #f3efff; --muted: rgba(243,239,255,.8); --cell: rgba(255,255,255,.1); --accent: #8b6be0; }
+  :root[data-theme="light"] { --fg: #2b2150; --muted: rgba(43,33,80,.82); --cell: rgba(107,63,160,.08); --accent: #6b3fa0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: transparent; overflow: hidden; }
   body {
@@ -14,19 +14,22 @@
     --u: min(calc(100vw / 220), calc(100vh / 140));
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color: var(--fg);
-    padding: calc(var(--u) * 5) calc(var(--u) * 7);
+    padding: calc(var(--u) * 3) calc(var(--u) * 7);
     display: flex; flex-direction: column; justify-content: space-between;
   }
   .row { display: flex; flex-direction: column; }
   .top { display: flex; justify-content: space-between; align-items: baseline;
          font-size: calc(var(--u) * 8); line-height: calc(var(--u) * 10); white-space: nowrap; }
   .label { font-weight: 600; }
-  .pct { font-weight: 400; margin-left: calc(var(--u) * 4); font-variant-numeric: tabular-nums; }
-  .left { color: var(--muted); font-size: calc(var(--u) * 6.5); }
-  .track { height: calc(var(--u) * 4); border-radius: calc(var(--u) * 2); background: var(--track);
-           margin: calc(var(--u) * 1.5) 0; overflow: hidden; }
-  .fill { height: 100%; width: 0; background: var(--accent); border-radius: calc(var(--u) * 2); }
-  .range { color: var(--muted); font-size: calc(var(--u) * 6); line-height: calc(var(--u) * 7.5);
+  .pct { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .left { color: var(--muted); font-size: calc(var(--u) * 6.5); margin-left: calc(var(--u) * 4); }
+  /* outlined bar holding 10 compartments, one per 10% */
+  .track { height: calc(var(--u) * 13); border: calc(var(--u) * 1.4) solid var(--accent);
+           border-radius: calc(var(--u) * 3); padding: calc(var(--u) * 1.4);
+           margin: calc(var(--u) * 1.5) 0 0; display: flex; gap: calc(var(--u) * 1.2); }
+  .cell { flex: 1; background: var(--cell); border-radius: calc(var(--u) * .6); overflow: hidden; }
+  .cell-fill { height: 100%; background: var(--accent); }
+  .range { color: var(--muted); font-size: calc(var(--u) * 6); line-height: calc(var(--u) * 7);
            font-variant-numeric: tabular-nums; white-space: nowrap; }
   #test { position: fixed; inset: 0; padding: 12px; font: 13px/1.5 ui-monospace, Consolas, monospace;
           background: #111; color: #ddd; overflow: auto; white-space: pre-wrap; }
@@ -93,18 +96,22 @@
     var today = dayNum(t.y, t.m, t.d);
     return periods(t).map(function (p) {
       var a = p.start * DAY, b = (p.end + 1) * DAY;
-      var pct = Math.max(0, Math.min(100, Math.floor((now - a) / (b - a) * 100)));
+      var exact = Math.max(0, Math.min(100, (now - a) / (b - a) * 100));
+      var pct = Math.floor(exact);
       var left = p.label === 'Day'
         ? (24 - t.h - (t.mi || t.s ? 1 : 0)) + 'h left'
         : (p.end - today) + ' day' + (p.end - today === 1 ? '' : 's') + ' left';
-      return { label: p.label, pct: pct, left: left, range: fmtDay(p.start) + ' – ' + fmtDay(p.end) };
+      return { label: p.label, pct: pct, exact: exact, left: left, range: fmtDay(p.start) + ' – ' + fmtDay(p.end) };
     });
   }
 
   var qs = new URLSearchParams(location.search);
 
   // Theme + accent
-  var theme = qs.get('theme') === 'light' ? 'light' : 'dark';
+  // ?theme=dark|light forces a theme; otherwise follow the viewer's color scheme.
+  var tp = qs.get('theme');
+  var theme = tp === 'light' || tp === 'dark' ? tp
+    : (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   document.documentElement.setAttribute('data-theme', theme);
   var acc = (qs.get('accent') || '').replace(/^#/, '');
   if (/^([0-9a-f]{3}|[0-9a-f]{6})$/i.test(acc)) document.documentElement.style.setProperty('--accent', '#' + acc);
@@ -119,17 +126,23 @@
       var top = document.createElement('div'); top.className = 'top';
       var l = document.createElement('span');
       var lab = document.createElement('span'); lab.className = 'label'; lab.textContent = r.label;
-      var pc = document.createElement('span'); pc.className = 'pct'; pc.textContent = r.pct + '%';
-      l.appendChild(lab); l.appendChild(pc);
       var lf = document.createElement('span'); lf.className = 'left'; lf.textContent = r.left;
-      top.appendChild(l); top.appendChild(lf);
+      l.appendChild(lab); l.appendChild(lf);
+      var pc = document.createElement('span'); pc.className = 'pct'; pc.textContent = r.pct + '%';
+      top.appendChild(l); top.appendChild(pc);
       var tr = document.createElement('div'); tr.className = 'track';
       tr.setAttribute('role', 'progressbar'); tr.setAttribute('aria-label', r.label);
       tr.setAttribute('aria-valuenow', r.pct); tr.setAttribute('aria-valuemin', 0); tr.setAttribute('aria-valuemax', 100);
-      var f = document.createElement('div'); f.className = 'fill'; f.style.width = r.pct + '%';
-      tr.appendChild(f);
-      var rg = document.createElement('div'); rg.className = 'range'; rg.textContent = r.range;
-      el.appendChild(top); el.appendChild(tr); el.appendChild(rg);
+      for (var i = 0; i < 10; i++) {
+        var c = document.createElement('div'); c.className = 'cell';
+        var share = Math.max(0, Math.min(1, (r.exact - i * 10) / 10)); // partial fill of this 10% block
+        if (share > 0) {
+          var fi = document.createElement('div'); fi.className = 'cell-fill'; fi.style.width = (share * 100) + '%';
+          c.appendChild(fi);
+        }
+        tr.appendChild(c);
+      }
+      el.appendChild(top); el.appendChild(tr);
       app.appendChild(el);
     });
   }
