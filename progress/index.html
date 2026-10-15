@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Progress</title>
 <style>
-  :root { --fg: #f3efff; --muted: rgba(243,239,255,.8); --cell: rgba(255,255,255,.1); --accent: #8b6be0; }
-  :root[data-theme="light"] { --fg: #2b2150; --muted: rgba(43,33,80,.82); --cell: rgba(107,63,160,.08); --accent: #6b3fa0; }
+  :root { --bg: #191919; --fg: #f3efff; --muted: rgba(243,239,255,.8); --cell: rgba(255,255,255,.1); --accent: #8b6be0; }
+  :root[data-theme="light"] { --bg: transparent; --fg: #2b2150; --muted: rgba(43,33,80,.82); --cell: rgba(107,63,160,.08); --accent: #6b3fa0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; background: transparent; overflow: hidden; }
+  html, body { height: 100%; background: var(--bg); overflow: hidden; }
   body {
     /* --u = 1 design pixel; base design is 220 x 140 and scales with the frame */
     --u: min(calc(100vw / 220), calc(100vh / 140));
@@ -108,10 +108,12 @@
   var qs = new URLSearchParams(location.search);
 
   // Theme + accent
-  // ?theme=dark|light forces a theme; otherwise follow the viewer's color scheme.
-  var tp = qs.get('theme');
-  var theme = tp === 'light' || tp === 'dark' ? tp
-    : (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  // ?theme=light|dark (default dark). Dark paints Notion's dark gray; light stays transparent.
+  var theme = qs.get('theme') === 'light' ? 'light' : 'dark';
+  // ?bg=hex or ?bg=transparent overrides the background.
+  var bg = (qs.get('bg') || '').replace(/^#/, '');
+  if (bg === 'transparent') document.documentElement.style.setProperty('--bg', 'transparent');
+  else if (/^([0-9a-f]{3}|[0-9a-f]{6})$/i.test(bg)) document.documentElement.style.setProperty('--bg', '#' + bg);
   document.documentElement.setAttribute('data-theme', theme);
   var acc = (qs.get('accent') || '').replace(/^#/, '');
   if (/^([0-9a-f]{3}|[0-9a-f]{6})$/i.test(acc)) document.documentElement.style.setProperty('--accent', '#' + acc);
